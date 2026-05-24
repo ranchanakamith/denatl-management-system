@@ -8,6 +8,7 @@ import {
   int,
 } from "drizzle-orm/mysql-core";
 
+// Keep users table for compatibility (not used by local auth)
 export const users = mysqlTable("users", {
   id: serial("id").primaryKey(),
   unionId: varchar("unionId", { length: 255 }).notNull().unique(),
@@ -26,19 +27,17 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-// Appointment slots - managed by the dentist
-export const slots = mysqlTable("slots", {
+// Appointments - these occupy time in the schedule
+export const appointments = mysqlTable("appointments", {
   id: serial("id").primaryKey(),
-  slotDate: varchar("slot_date", { length: 20 }).notNull(),
+  appointmentDate: varchar("appointment_date", { length: 20 }).notNull(),
   startTime: varchar("start_time", { length: 10 }).notNull(),
   endTime: varchar("end_time", { length: 10 }).notNull(),
-  status: mysqlEnum("status", ["available", "booked", "completed", "cancelled"])
-    .default("available")
-    .notNull(),
-  patientName: varchar("patient_name", { length: 255 }),
+  patientName: varchar("patient_name", { length: 255 }).notNull(),
   patientPhone: varchar("patient_phone", { length: 50 }),
   notes: text("notes"),
-  dailyNumber: int("daily_number"),
+  dailyNumber: int("daily_number").notNull(),
+  status: varchar("status", { length: 20 }).notNull().default("waiting"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")
     .defaultNow()
@@ -46,5 +45,5 @@ export const slots = mysqlTable("slots", {
     .$onUpdate(() => new Date()),
 });
 
-export type Slot = typeof slots.$inferSelect;
-export type InsertSlot = typeof slots.$inferInsert;
+export type Appointment = typeof appointments.$inferSelect;
+export type InsertAppointment = typeof appointments.$inferInsert;

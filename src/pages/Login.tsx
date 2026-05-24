@@ -1,24 +1,40 @@
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Stethoscope } from "lucide-react";
-
-function getOAuthUrl() {
-  const kimiAuthUrl = import.meta.env.VITE_KIMI_AUTH_URL;
-  const appID = import.meta.env.VITE_APP_ID;
-  const redirectUri = `${window.location.origin}/api/oauth/callback`;
-  const state = btoa(redirectUri);
-
-  const url = new URL(`${kimiAuthUrl}/api/oauth/authorize`);
-  url.searchParams.set("client_id", appID);
-  url.searchParams.set("redirect_uri", redirectUri);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", "profile");
-  url.searchParams.set("state", state);
-
-  return url.toString();
-}
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Stethoscope, AlertCircle } from "lucide-react";
+import { trpc } from "@/providers/trpc";
 
 export default function Login() {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+
+  const loginMutation = trpc.auth.login.useMutation({
+    onSuccess: (data) => {
+      if (data.success && data.token) {
+        localStorage.setItem("auth_token", data.token);
+        window.location.href = "/";
+      } else {
+        setError(data.message || "Login failed");
+      }
+    },
+    onError: (err) => {
+      setError(err.message || "Login failed");
+    },
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    if (!username.trim() || !password.trim()) {
+      setError("Please enter both username and password");
+      return;
+    }
+    loginMutation.mutate({ username: username.trim(), password: password.trim() });
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
       <Card className="w-full max-w-sm shadow-lg">
@@ -31,23 +47,48 @@ export default function Login() {
               Dental Clinic Manager
             </CardTitle>
             <CardDescription className="text-sm text-slate-500 mt-1">
-              Dentist Portal
+              Dentist Login
             </CardDescription>
           </div>
         </CardHeader>
         <CardContent>
-          <Button
-            className="w-full bg-teal-600 hover:bg-teal-700 text-white"
-            size="lg"
-            onClick={() => {
-              window.location.href = getOAuthUrl();
-            }}
-          >
-            Sign in to Continue
-          </Button>
-          <p className="text-center text-xs text-slate-400 mt-4">
-            Authorized dentist access only
-          </p>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="username">Username</Label>
+              <Input
+                id="username"
+                placeholder="Enter username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                placeholder="Enter password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+              />
+            </div>
+            {error && (
+              <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 p-3 rounded-lg">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                {error}
+              </div>
+            )}
+            <Button
+              type="submit"
+              className="w-full bg-teal-600 hover:bg-teal-700 text-white"
+              size="lg"
+              disabled={loginMutation.isPending}
+            >
+              {loginMutation.isPending ? "Signing in..." : "Sign In"}
+            </Button>
+          </form>
         </CardContent>
       </Card>
     </div>
