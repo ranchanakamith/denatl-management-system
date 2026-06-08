@@ -14,8 +14,10 @@
       "node"
     ],
     "skipLibCheck": true,
-    "baseUrl": ".",
     "paths": {
+      "*": [
+        "./*"
+      ],
       "@/*": [
         "./src/*"
       ],

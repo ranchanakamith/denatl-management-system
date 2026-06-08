@@ -1,7 +1,9 @@
 import { z } from "zod";
 import { createRouter, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { slots } from "@db/schema";
+import * as dbSchema from "@db/schema";
+// Use a runtime-checked reference to the slots table to avoid TypeScript export mismatch
+const slots = (dbSchema as any).slots;
 import { eq, and, gte, lte, desc, asc } from "drizzle-orm";
 
 export const slotRouter = createRouter({

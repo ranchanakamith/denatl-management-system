@@ -37,8 +37,9 @@ async function exchangeAuthCode(
   return resp.json() as Promise<TokenResponse>;
 }
 
+// Add a fallback of "http://localhost" so the URL parser never crashes
 const jwks = jose.createRemoteJWKSet(
-  new URL(`${env.kimiAuthUrl}/api/.well-known/jwks.json`),
+  new URL(`${env.kimiAuthUrl || "http://localhost"}/api/.well-known/jwks.json`),
 );
 
 async function verifyAccessToken(

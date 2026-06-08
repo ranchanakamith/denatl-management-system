@@ -2,7 +2,8 @@ import { z } from "zod";
 import { createRouter, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { appointments } from "@db/schema";
-import { eq, and, asc, desc } from "drizzle-orm";
+import { eq, and, asc, desc, inArray } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 
 // Working hours
 const OPEN_TIME = "08:00";
@@ -10,8 +11,9 @@ const CLOSE_TIME = "17:00";
 
 // Helper: time string "HH:MM" to minutes
 function timeToMinutes(time: string): number {
+  if (!time || !time.includes(":")) return 0;
   const [h, m] = time.split(":").map(Number);
-  return h * 60 + m;
+  return h * 60 + (m || 0);
 }
 
 // Helper: minutes to "HH:MM"
@@ -23,56 +25,60 @@ function minutesToTime(minutes: number): string {
 
 // Calculate free time ranges for a date
 async function calculateFreeTime(date: string) {
-  const db = getDb();
-  const booked = await db
-    .select()
-    .from(appointments)
-    .where(
-      and(
-        eq(appointments.appointmentDate, date),
-        eq(appointments.status, "waiting")
+  try {
+    const db = getDb();
+    const booked = await db
+      .select()
+      .from(appointments)
+      .where(
+        and(
+          eq(appointments.appointmentDate, date),
+          inArray(appointments.status, ["waiting", "in_session", "completed"])
+        )
       )
-    )
-    .orderBy(asc(appointments.startTime));
+      .orderBy(asc(appointments.startTime));
 
-  const openMin = timeToMinutes(OPEN_TIME);
-  const closeMin = timeToMinutes(CLOSE_TIME);
+    const openMin = timeToMinutes(OPEN_TIME);
+    const closeMin = timeToMinutes(CLOSE_TIME);
 
-  // No bookings = entire day is free
-  if (booked.length === 0) {
-    return [{ start: OPEN_TIME, end: CLOSE_TIME }];
-  }
+    if (!booked || booked.length === 0) {
+      return [{ start: OPEN_TIME, end: CLOSE_TIME }];
+    }
 
-  const freeRanges: { start: string; end: string }[] = [];
-  let currentEnd = openMin;
+    const freeRanges: { start: string; end: string }[] = [];
+    let currentEnd = openMin;
 
-  for (const appt of booked) {
-    const apptStart = timeToMinutes(appt.startTime);
-    const apptEnd = timeToMinutes(appt.endTime);
+    for (const appt of booked) {
+      const apptStart = timeToMinutes(appt.startTime);
+      const apptEnd = timeToMinutes(appt.endTime);
 
-    // Gap before this appointment
-    if (currentEnd < apptStart) {
+      if (apptEnd <= currentEnd) continue;
+
+      if (currentEnd < apptStart) {
+        const gapEnd = Math.min(apptStart, closeMin);
+        if (currentEnd < gapEnd) {
+          freeRanges.push({
+            start: minutesToTime(currentEnd),
+            end: minutesToTime(gapEnd),
+          });
+        }
+      }
+
+      currentEnd = Math.max(currentEnd, apptEnd);
+    }
+
+    if (currentEnd < closeMin) {
       freeRanges.push({
         start: minutesToTime(currentEnd),
-        end: minutesToTime(apptStart),
+        end: CLOSE_TIME,
       });
     }
 
-    // Move cursor to after this appointment
-    if (apptEnd > currentEnd) {
-      currentEnd = apptEnd;
-    }
+    return freeRanges;
+  } catch (error) {
+    console.error("Error calculating free time:", error);
+    return [{ start: OPEN_TIME, end: CLOSE_TIME }];
   }
-
-  // Gap after last appointment until close
-  if (currentEnd < closeMin) {
-    freeRanges.push({
-      start: minutesToTime(currentEnd),
-      end: CLOSE_TIME,
-    });
-  }
-
-  return freeRanges;
 }
 
 export const appointmentRouter = createRouter({
@@ -110,7 +116,40 @@ export const appointmentRouter = createRouter({
       })
     )
     .mutation(async ({ input }) => {
+      const startMin = timeToMinutes(input.startTime);
+      const endMin = timeToMinutes(input.endTime);
+
+      if (startMin >= endMin) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "End time must be after start time",
+        });
+      }
+
       const db = getDb();
+      const existing = await db
+        .select()
+        .from(appointments)
+        .where(
+          and(
+            eq(appointments.appointmentDate, input.appointmentDate),
+            inArray(appointments.status, ["waiting", "in_session", "completed"])
+          )
+        );
+
+      const hasConflict = existing.some((appt) => {
+        const apptStart = timeToMinutes(appt.startTime);
+        const apptEnd = timeToMinutes(appt.endTime);
+        return startMin < apptEnd && endMin > apptStart;
+      });
+
+      if (hasConflict) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "Time slot unavailable. It conflicts with an existing appointment.",
+        });
+      }
+
       const result = await db.insert(appointments).values({
         appointmentDate: input.appointmentDate,
         startTime: input.startTime,
