@@ -2,7 +2,6 @@ import { z } from "zod";
 import { createRouter, publicQuery } from "./middleware";
 import { SignJWT, jwtVerify } from "jose";
 
-// Hardcoded dentist credentials - simple single-user system
 const DENTIST_USER = {
   id: "dentist",
   username: "dentist",
@@ -22,13 +21,9 @@ export async function createToken(username: string): Promise<string> {
     .sign(JWT_SECRET);
 }
 
-export async function verifyToken(
-  token: string
-): Promise<{ username: string } | null> {
+export async function verifyToken(token: string): Promise<{ username: string } | null> {
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET, {
-      clockTolerance: 60,
-    });
+    const { payload } = await jwtVerify(token, JWT_SECRET, { clockTolerance: 60 });
     return payload as { username: string };
   } catch {
     return null;
@@ -37,50 +32,32 @@ export async function verifyToken(
 
 export const localAuthRouter = createRouter({
   login: publicQuery
-    .input(
-      z.object({
-        username: z.string(),
-        password: z.string(),
-      })
-    )
+    .input(z.object({ username: z.string(), password: z.string() }))
     .mutation(async ({ input }) => {
-      if (
-        input.username === DENTIST_USER.username &&
-        input.password === DENTIST_USER.password
-      ) {
+      if (input.username === DENTIST_USER.username && input.password === DENTIST_USER.password) {
         const token = await createToken(DENTIST_USER.username);
         return {
           success: true,
           token,
-          user: {
-            id: DENTIST_USER.id,
-            name: DENTIST_USER.name,
-            username: DENTIST_USER.username,
-          },
+          user: { id: DENTIST_USER.id, name: DENTIST_USER.name, username: DENTIST_USER.username },
         };
       }
-      return {
-        success: false,
-        token: null,
-        user: null,
-        message: "Invalid username or password",
-      };
+      return { success: false, token: null, user: null, message: "Invalid username or password" };
     }),
 
   me: publicQuery.query(async ({ ctx }) => {
-    const authHeader = ctx.req.headers.get("x-auth-token");
-    if (!authHeader) return null;
-
-    const decoded = await verifyToken(authHeader);
-    if (!decoded) return null;
-
-    if (decoded.username === DENTIST_USER.username) {
-      return {
-        id: DENTIST_USER.id,
-        name: DENTIST_USER.name,
-        username: DENTIST_USER.username,
-      };
+    try {
+      const authHeader = ctx.req.headers.get("x-auth-token");
+      if (!authHeader) return null;
+      const decoded = await verifyToken(authHeader);
+      if (!decoded) return null;
+      if (decoded.username === DENTIST_USER.username) {
+        return { id: DENTIST_USER.id, name: DENTIST_USER.name, username: DENTIST_USER.username };
+      }
+      return null;
+    } catch (error) {
+      console.error("[LocalAuth.me] Error:", error);
+      return null;
     }
-    return null;
   }),
 });

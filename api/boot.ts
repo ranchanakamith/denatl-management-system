@@ -5,21 +5,41 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env } from "./lib/env";
+import { initDb } from "./queries/connection";
 import { createOAuthCallbackHandler } from "./kimi/auth";
 import { Paths } from "@contracts/constants";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
 
 app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
-app.get(Paths.oauthCallback, createOAuthCallbackHandler());
-app.use("/api/trpc/*", async (c) => {
-  return fetchRequestHandler({
-    endpoint: "/api/trpc",
-    req: c.req.raw,
-    router: appRouter,
-    createContext,
-  });
+
+// Initialize database eagerly on startup
+app.use("*", async (c, next) => {
+  try {
+    await initDb();
+  } catch (error) {
+    console.error("[Boot] DB init error:", error);
+    // Still allow request through - getDb() will retry
+  }
+  return next();
 });
+
+app.get(Paths.oauthCallback, createOAuthCallbackHandler());
+
+app.use("/api/trpc/*", async (c) => {
+  try {
+    return fetchRequestHandler({
+      endpoint: "/api/trpc",
+      req: c.req.raw,
+      router: appRouter,
+      createContext,
+    });
+  } catch (error) {
+    console.error("[tRPC] Fatal handler error:", error);
+    return c.json({ error: "Internal server error", message: String(error) }, 500);
+  }
+});
+
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 
 export default app;

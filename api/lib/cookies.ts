@@ -1,17 +1,13 @@
-import type { CookieOptions } from "hono/utils/cookie";
+import type { IncomingHttpHeaders } from "http";
 
-function isLocalhost(headers: Headers): boolean {
-  const host = headers.get("host") || "";
-  return host.startsWith("localhost:") || host.startsWith("127.0.0.1:");
-}
-
-export function getSessionCookieOptions(headers: Headers): CookieOptions {
-  const localhost = isLocalhost(headers);
-
+export function getSessionCookieOptions(headers: IncomingHttpHeaders | Headers) {
+  const isSecure = process.env.NODE_ENV === "production";
+  
   return {
     httpOnly: true,
     path: "/",
-    sameSite: localhost ? "Lax" : "None",
-    secure: !localhost,
+    sameSite: "lax" as const,
+    secure: isSecure,
+    maxAge: 60 * 60 * 24 * 7,
   };
 }

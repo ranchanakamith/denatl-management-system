@@ -1,2 +1,1 @@
-export type * from "../db/schema";
-export * from "./errors";
+export type Maybe<T> = T | null | undefined;

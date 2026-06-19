@@ -117,7 +117,7 @@ export function createOAuthCallbackHandler() {
       const cookieOpts = getSessionCookieOptions(c.req.raw.headers);
       setCookie(c, Session.cookieName, token, {
         ...cookieOpts,
-        maxAge: Session.maxAgeMs / 1000,
+        maxAge: 60 * 60 * 24 * 7,
       });
 
       return c.redirect("/", 302);

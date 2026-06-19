@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1781290115676,
+      "tag": "0000_sad_adam_destine",
+      "breakpoints": true
+    }
+  ]
+}

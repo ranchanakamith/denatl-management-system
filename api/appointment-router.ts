@@ -5,28 +5,26 @@ import { appointments } from "@db/schema";
 import { eq, and, asc, desc, inArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 
-// Working hours
 const OPEN_TIME = "08:00";
 const CLOSE_TIME = "17:00";
 
-// Helper: time string "HH:MM" to minutes
 function timeToMinutes(time: string): number {
-  if (!time || !time.includes(":")) return 0;
+  if (!time || typeof time !== "string" || !time.includes(":")) return 0;
   const [h, m] = time.split(":").map(Number);
-  return h * 60 + (m || 0);
+  if (isNaN(h) || isNaN(m)) return 0;
+  return h * 60 + m;
 }
 
-// Helper: minutes to "HH:MM"
 function minutesToTime(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
-// Calculate free time ranges for a date
 async function calculateFreeTime(date: string) {
   try {
-    const db = getDb();
+    const db = await getDb();
+
     const booked = await db
       .select()
       .from(appointments)
@@ -41,6 +39,9 @@ async function calculateFreeTime(date: string) {
     const openMin = timeToMinutes(OPEN_TIME);
     const closeMin = timeToMinutes(CLOSE_TIME);
 
+    console.log(`[FreeTime] Date: ${date}, Appointments: ${booked.length}`);
+
+    // No appointments = full day free
     if (!booked || booked.length === 0) {
       return [{ start: OPEN_TIME, end: CLOSE_TIME }];
     }
@@ -52,6 +53,7 @@ async function calculateFreeTime(date: string) {
       const apptStart = timeToMinutes(appt.startTime);
       const apptEnd = timeToMinutes(appt.endTime);
 
+      if (isNaN(apptStart) || isNaN(apptEnd)) continue;
       if (apptEnd <= currentEnd) continue;
 
       if (currentEnd < apptStart) {
@@ -65,6 +67,7 @@ async function calculateFreeTime(date: string) {
       }
 
       currentEnd = Math.max(currentEnd, apptEnd);
+      if (currentEnd >= closeMin) break;
     }
 
     if (currentEnd < closeMin) {
@@ -74,35 +77,50 @@ async function calculateFreeTime(date: string) {
       });
     }
 
+    // Safety net: if empty but no valid blocking appointments, return full day
+    if (freeRanges.length === 0) {
+      const hasValidBlocking = booked.some((appt) => {
+        const s = timeToMinutes(appt.startTime);
+        const e = timeToMinutes(appt.endTime);
+        return !isNaN(s) && !isNaN(e) && e > openMin && s < closeMin;
+      });
+
+      if (!hasValidBlocking) {
+        return [{ start: OPEN_TIME, end: CLOSE_TIME }];
+      }
+    }
+
     return freeRanges;
   } catch (error) {
-    console.error("Error calculating free time:", error);
+    console.error("[FreeTime] Error:", error);
     return [{ start: OPEN_TIME, end: CLOSE_TIME }];
   }
 }
 
 export const appointmentRouter = createRouter({
-  // List booked appointments for a date
   list: publicQuery
     .input(z.object({ date: z.string() }))
     .query(async ({ input }) => {
-      const db = getDb();
-      const result = await db
-        .select()
-        .from(appointments)
-        .where(eq(appointments.appointmentDate, input.date))
-        .orderBy(asc(appointments.startTime));
-      return result;
+      try {
+        const db = await getDb();
+        const result = await db
+          .select()
+          .from(appointments)
+          .where(eq(appointments.appointmentDate, input.date))
+          .orderBy(asc(appointments.startTime));
+        return result;
+      } catch (error) {
+        console.error("[Appointment.list] Error:", error);
+        return [];
+      }
     }),
 
-  // Get free time ranges for a date
   freeTime: publicQuery
     .input(z.object({ date: z.string() }))
     .query(async ({ input }) => {
       return calculateFreeTime(input.date);
     }),
 
-  // Create a new appointment (books a free time slot)
   create: publicQuery
     .input(
       z.object({
@@ -126,7 +144,7 @@ export const appointmentRouter = createRouter({
         });
       }
 
-      const db = getDb();
+      const db = await getDb();
       const existing = await db
         .select()
         .from(appointments)
@@ -163,7 +181,6 @@ export const appointmentRouter = createRouter({
       return { id: Number(result[0].insertId) };
     }),
 
-  // Update appointment status
   updateStatus: publicQuery
     .input(
       z.object({
@@ -172,7 +189,7 @@ export const appointmentRouter = createRouter({
       })
     )
     .mutation(async ({ input }) => {
-      const db = getDb();
+      const db = await getDb();
       await db
         .update(appointments)
         .set({ status: input.status })
@@ -180,20 +197,18 @@ export const appointmentRouter = createRouter({
       return { success: true };
     }),
 
-  // Delete an appointment
   delete: publicQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
-      const db = getDb();
+      const db = await getDb();
       await db.delete(appointments).where(eq(appointments.id, input.id));
       return { success: true };
     }),
 
-  // Get next daily number for a date
   getNextDailyNumber: publicQuery
     .input(z.object({ date: z.string() }))
     .query(async ({ input }) => {
-      const db = getDb();
+      const db = await getDb();
       const result = await db
         .select()
         .from(appointments)
